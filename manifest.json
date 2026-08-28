@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ceffo.ultrawide-bar",
+  "name": "Ultrawide Bar",
+  "version": "0.1.0",
+  "author": "ceffo",
+  "description": "The stock Omarchy bar, constrained to a percentage of the screen's long edge. For ultrawide monitors, where a full-width bar strands its widget groups a metre apart.",
+  "kinds": [
+    "bar"
+  ],
+  "entryPoints": {
+    "bar": "UltrawideBar.qml"
+  }
+}
