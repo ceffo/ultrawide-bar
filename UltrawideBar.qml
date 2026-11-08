@@ -274,6 +274,45 @@ Item {
     return { lead: lead, span: span }
   }
 
+  // omarchy >= 4.5: the panel already spans its screen and draws the bar in a
+  // `barStrip` item (background Rectangle + content Loader), with its input
+  // Region bound to that item. Find it as the contentItem child that holds the
+  // content Loader.
+  function barStripOf(panel) {
+    var kids = panel.contentItem ? panel.contentItem.children : null
+    if (!kids) return null
+    for (var i = 0; i < kids.length; i++) {
+      var grand = kids[i] ? kids[i].children : null
+      if (!grand) continue
+      for (var j = 0; j < grand.length; j++) {
+        if (grand[j] && ("sourceComponent" in grand[j])) return kids[i]
+      }
+    }
+    return null
+  }
+
+  // Resizing the strip is all it takes: the backdrop and input mask upstream
+  // attach to it follow along. Bindings (not one-shot values) so thickness,
+  // position and screen-size changes keep tracking without a re-apply.
+  function insetStrip(panel, strip) {
+    strip.x = Qt.binding(function() {
+      if (root.innerBar.vertical === true)
+        return root.innerBar.position === "right" ? panel.width - panel.thickness : 0
+      return root.insetsFor(panel, false).lead
+    })
+    strip.y = Qt.binding(function() {
+      if (root.innerBar.vertical === true) return root.insetsFor(panel, true).lead
+      return root.innerBar.position === "bottom" ? panel.height - panel.thickness : 0
+    })
+    strip.width = Qt.binding(function() {
+      return root.innerBar.vertical === true ? panel.thickness : root.insetsFor(panel, false).span
+    })
+    strip.height = Qt.binding(function() {
+      return root.innerBar.vertical === true ? root.insetsFor(panel, true).span : panel.thickness
+    })
+  }
+
+  // insetsFor() measures the long edge of the full-screen surface.
   function applyInsets() {
     if (!innerBar) return
 
@@ -284,6 +323,13 @@ Item {
       var panel = panels[i]
       if (!panel || !panel.contentItem) continue
 
+      var strip = barStripOf(panel)
+      if (strip && ("thickness" in panel)) {
+        insetStrip(panel, strip)
+        continue
+      }
+
+      // Pre-4.5 layout: the Loader sat directly under contentItem.
       var loader = contentLoaderOf(panel)
       if (!loader) continue
 
