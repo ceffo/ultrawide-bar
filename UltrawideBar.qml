@@ -1,5 +1,7 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
+import Quickshell.Io
 
 // A bar option that renders the *packaged* Omarchy bar and constrains it to a
 // fraction of the screen's long edge.
@@ -154,6 +156,76 @@ Item {
     if (shell && innerBar && shell.bar === innerBar) shell.bar = null
   }
 
+  // ------------------------------------------------- screensaver hiding
+  //
+  // omarchy >= 4.5 opens the screensaver as a fullscreen terminal on a
+  // *special* workspace (special:screensaver-<monitor>) instead of the active
+  // one. Hyprland only fades Top-layer surfaces under a fullscreen window on
+  // the monitor's regular active workspace, and draws them above special
+  // workspaces, so the bar stayed painted over the screensaver. While any
+  // screensaver window is open, park the strip off its surface and hide it.
+  // The exclusive zone is left alone, so tiled windows don't reflow.
+
+  readonly property string screensaverClass: "org.omarchy.screensaver"
+  property var screensaverWindows: ({})
+  readonly property bool screensaverUp: Object.keys(screensaverWindows).length > 0
+
+  function normalizeAddress(address) {
+    var a = String(address || "").trim().toLowerCase()
+    return a.indexOf("0x") === 0 ? a.slice(2) : a
+  }
+
+  function setScreensaverWindow(address, open) {
+    var key = normalizeAddress(address)
+    if (!key) return
+    var next = {}
+    for (var k in screensaverWindows) next[k] = true
+    if (open) next[key] = true
+    else delete next[key]
+    screensaverWindows = next
+  }
+
+  function eventParts(event, count) {
+    try {
+      if (event && event.parse) return event.parse(count)
+    } catch (e) {
+    }
+    return String(event && event.data ? event.data : "").split(",")
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = String(event && event.name ? event.name : "")
+      if (name === "openwindow") {
+        var open = root.eventParts(event, 4)
+        if (String(open[2] || "") === root.screensaverClass) root.setScreensaverWindow(open[0], true)
+      } else if (name === "closewindow") {
+        var close = root.eventParts(event, 1)
+        if (root.screensaverWindows[root.normalizeAddress(close[0])]) root.setScreensaverWindow(close[0], false)
+      }
+    }
+  }
+
+  // A shell restart while the screensaver is up would miss its openwindow.
+  Process {
+    id: screensaverScan
+    running: true
+    command: ["hyprctl", "clients", "-j"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var clients = []
+        try { clients = JSON.parse(text) } catch (e) { return }
+        var found = {}
+        for (var i = 0; i < clients.length; i++) {
+          var c = clients[i]
+          if (c && c.mapped && String(c["class"]) === root.screensaverClass) found[root.normalizeAddress(c.address)] = true
+        }
+        root.screensaverWindows = found
+      }
+    }
+  }
+
   // --------------------------------------------------------- geometry
 
   Connections {
@@ -295,15 +367,21 @@ Item {
   // attach to it follow along. Bindings (not one-shot values) so thickness,
   // position and screen-size changes keep tracking without a re-apply.
   function insetStrip(panel, strip) {
+    // Parked just past the bar's screen edge while the screensaver is up, so
+    // neither the strip nor its input region is on screen.
     strip.x = Qt.binding(function() {
-      if (root.innerBar.vertical === true)
-        return root.innerBar.position === "right" ? panel.width - panel.thickness : 0
+      if (root.innerBar.vertical === true) {
+        if (root.innerBar.position === "right") return root.screensaverUp ? panel.width : panel.width - panel.thickness
+        return root.screensaverUp ? -panel.thickness : 0
+      }
       return root.insetsFor(panel, false).lead
     })
     strip.y = Qt.binding(function() {
       if (root.innerBar.vertical === true) return root.insetsFor(panel, true).lead
-      return root.innerBar.position === "bottom" ? panel.height - panel.thickness : 0
+      if (root.innerBar.position === "bottom") return root.screensaverUp ? panel.height : panel.height - panel.thickness
+      return root.screensaverUp ? -panel.thickness : 0
     })
+    strip.visible = Qt.binding(function() { return !root.screensaverUp })
     strip.width = Qt.binding(function() {
       return root.innerBar.vertical === true ? panel.thickness : root.insetsFor(panel, false).span
     })
